@@ -16,6 +16,7 @@ interface VideoCardProps {
 declare global {
   interface Window {
     onYouTubeIframeAPIReady: (() => void) | undefined;
+    YT: any;
   }
 }
 
@@ -28,7 +29,7 @@ function loadYouTubeAPI(): Promise<void> {
     return apiLoadPromise;
   }
 
-  apiLoadPromise = new Promise((resolve) => {
+  apiLoadPromise = new Promise<void>((resolve, reject) => {
     const prev = window.onYouTubeIframeAPIReady;
     window.onYouTubeIframeAPIReady = () => {
       prev?.();
@@ -36,8 +37,10 @@ function loadYouTubeAPI(): Promise<void> {
     };
     const tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
+    tag.onerror = () => reject(new Error('YouTube API script load failed'));
     const firstScriptTag = document.getElementsByTagName('script')[0];
     firstScriptTag.parentNode!.insertBefore(tag, firstScriptTag);
+    setTimeout(() => reject(new Error('YouTube API script load timed out')), 15000);
   });
   return apiLoadPromise;
 }
@@ -53,9 +56,9 @@ export default function VideoCard({ video, isActive, onLike, onSave, volume, isM
   const [scrubProgress, setScrubProgress] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<YT.Player | null>(null);
+  const playerRef = useRef<any>(null);
   const playerContainerId = useRef(`yt-player-${video.id}`);
-  const progressInterval = useRef<ReturnType<typeof setInterval>>();
+  const progressInterval = useRef<ReturnType<typeof setInterval>>(null);
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
 
@@ -120,9 +123,19 @@ export default function VideoCard({ video, isActive, onLike, onSave, volume, isM
   // Load YouTube API
   useEffect(() => {
     let cancelled = false;
-    loadYouTubeAPI().then(() => {
-      if (!cancelled) setApiReady(true);
-    });
+    loadYouTubeAPI()
+      .then(() => {
+        if (!cancelled) {
+          if (window.YT?.Player) {
+            setApiReady(true);
+          } else {
+            setLoadError(true);
+          }
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLoadError(true);
+      });
     return () => { cancelled = true; };
   }, []);
 
@@ -143,13 +156,13 @@ export default function VideoCard({ video, isActive, onLike, onSave, volume, isM
           iv_load_policy: 3,
         },
         events: {
-          onReady: (e: YT.PlayerEvent) => {
+          onReady: (e: any) => {
             const p = e.target;
             p.setVolume(volume);
             if (isMuted) p.mute(); else p.unMute();
             if (isActiveRef.current) p.playVideo();
           },
-          onStateChange: (e: YT.OnStateChangeEvent) => {
+          onStateChange: (e: any) => {
             if (e.data === window.YT.PlayerState.PLAYING) {
               setIsPlaying(true);
             } else if (e.data === window.YT.PlayerState.PAUSED || e.data === window.YT.PlayerState.ENDED) {
@@ -305,6 +318,13 @@ export default function VideoCard({ video, isActive, onLike, onSave, volume, isM
           <span className="text-3xl">⚠️</span>
           <p className="text-xs">Video unavailable</p>
           <p className="text-[10px] text-[#666]">youtube.com/watch?v={video.youtubeId}</p>
+        </div>
+      )}
+
+      {/* Loading spinner — shown while YouTube API is initializing */}
+      {!apiReady && !loadError && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/40 z-10">
+          <div className="w-8 h-8 border-2 border-white/20 border-t-white/80 rounded-full animate-spin" />
         </div>
       )}
 
