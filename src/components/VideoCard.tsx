@@ -21,7 +21,6 @@ declare global {
 
 const API_LOAD_TIMEOUT = 15000;
 let apiLoadPromise: Promise<void> | null = null;
-let apiLoadTimer: ReturnType<typeof setTimeout> | null = null;
 
 function loadYouTubeAPI(): Promise<void> {
   if (window.YT?.Player) {
@@ -31,23 +30,27 @@ function loadYouTubeAPI(): Promise<void> {
   if (apiLoadPromise) return apiLoadPromise;
 
   apiLoadPromise = new Promise<void>((resolve, reject) => {
+    let timer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+      window.onYouTubeIframeAPIReady = prev;
+      reject(new Error('YouTube API script load timed out'));
+    }, API_LOAD_TIMEOUT);
+
     const prev = window.onYouTubeIframeAPIReady;
     window.onYouTubeIframeAPIReady = () => {
-      prev?.();
-      clearTimeout(apiLoadTimer!);
+      window.onYouTubeIframeAPIReady = prev;
+      clearTimeout(timer!);
       resolve();
     };
+
     const tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
     tag.onerror = () => {
-      clearTimeout(apiLoadTimer!);
+      window.onYouTubeIframeAPIReady = prev;
+      clearTimeout(timer!);
       reject(new Error('YouTube API script load failed'));
     };
     const firstScriptTag = document.getElementsByTagName('script')[0];
     firstScriptTag.parentNode!.insertBefore(tag, firstScriptTag);
-    apiLoadTimer = setTimeout(() => {
-      reject(new Error('YouTube API script load timed out'));
-    }, API_LOAD_TIMEOUT);
   }).catch((err) => {
     apiLoadPromise = null;  // Allow retry on failure
     throw err;
