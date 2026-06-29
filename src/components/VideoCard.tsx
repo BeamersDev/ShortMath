@@ -16,31 +16,41 @@ interface VideoCardProps {
 declare global {
   interface Window {
     onYouTubeIframeAPIReady: (() => void) | undefined;
-    YT: any;
   }
 }
 
+const API_LOAD_TIMEOUT = 15000;
 let apiLoadPromise: Promise<void> | null = null;
+let apiLoadTimer: ReturnType<typeof setTimeout> | null = null;
 
 function loadYouTubeAPI(): Promise<void> {
-  if (apiLoadPromise) return apiLoadPromise;
   if (window.YT?.Player) {
     apiLoadPromise = Promise.resolve();
     return apiLoadPromise;
   }
+  if (apiLoadPromise) return apiLoadPromise;
 
   apiLoadPromise = new Promise<void>((resolve, reject) => {
     const prev = window.onYouTubeIframeAPIReady;
     window.onYouTubeIframeAPIReady = () => {
       prev?.();
+      clearTimeout(apiLoadTimer!);
       resolve();
     };
     const tag = document.createElement('script');
     tag.src = 'https://www.youtube.com/iframe_api';
-    tag.onerror = () => reject(new Error('YouTube API script load failed'));
+    tag.onerror = () => {
+      clearTimeout(apiLoadTimer!);
+      reject(new Error('YouTube API script load failed'));
+    };
     const firstScriptTag = document.getElementsByTagName('script')[0];
     firstScriptTag.parentNode!.insertBefore(tag, firstScriptTag);
-    setTimeout(() => reject(new Error('YouTube API script load timed out')), 15000);
+    apiLoadTimer = setTimeout(() => {
+      reject(new Error('YouTube API script load timed out'));
+    }, API_LOAD_TIMEOUT);
+  }).catch((err) => {
+    apiLoadPromise = null;  // Allow retry on failure
+    throw err;
   });
   return apiLoadPromise;
 }
@@ -56,9 +66,9 @@ export default function VideoCard({ video, isActive, onLike, onSave, volume, isM
   const [scrubProgress, setScrubProgress] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const progressBarRef = useRef<HTMLDivElement>(null);
-  const playerRef = useRef<any>(null);
+  const playerRef = useRef<YT.Player | null>(null);
   const playerContainerId = useRef(`yt-player-${video.id}`);
-  const progressInterval = useRef<ReturnType<typeof setInterval>>(null);
+  const progressInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const isActiveRef = useRef(isActive);
   isActiveRef.current = isActive;
 
@@ -156,13 +166,13 @@ export default function VideoCard({ video, isActive, onLike, onSave, volume, isM
           iv_load_policy: 3,
         },
         events: {
-          onReady: (e: any) => {
+          onReady: (e: YT.PlayerEvent) => {
             const p = e.target;
             p.setVolume(volume);
             if (isMuted) p.mute(); else p.unMute();
             if (isActiveRef.current) p.playVideo();
           },
-          onStateChange: (e: any) => {
+          onStateChange: (e: YT.OnStateChangeEvent) => {
             if (e.data === window.YT.PlayerState.PLAYING) {
               setIsPlaying(true);
             } else if (e.data === window.YT.PlayerState.PAUSED || e.data === window.YT.PlayerState.ENDED) {
